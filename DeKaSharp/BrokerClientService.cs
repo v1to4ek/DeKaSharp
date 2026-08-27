@@ -32,13 +32,6 @@ namespace DeKaSharp
             public required string TopicName { get; set; }
         }
 
-        private record struct MessageToProduce
-        {
-            public required string keyItem; 
-            
-            public string valueItem;
-        }
-
         private enum ServiceProcessorsState
         {
             Empty,
@@ -65,7 +58,7 @@ namespace DeKaSharp
             _router = new ProducingRouter();
         }
 
-        public PublisherDelegate GetPublisher(string id) => _router.PublishItem;
+        public PublisherDelegate InputData() => _router.PublishItem;
 
         public string AddProducer(string serverId, string topicName)
         {
@@ -101,13 +94,15 @@ namespace DeKaSharp
 
         public async Task StartServiceAsync()
         {
-            RegisterProducersTasks();
+            var stoppingToken = _cts.Token;
+            
+            RegisterProducersTasks(stoppingToken);
 
-            RegisterConsumersTasks();
+            RegisterConsumersTasks(stoppingToken);
 
             var exceptionalState = false;
 
-            var routerTask = _router.Start();
+            var routerTask = _router.Start(stoppingToken);
 
             Task generalTask;
 
@@ -150,13 +145,43 @@ namespace DeKaSharp
             }
             finally
             {
-                foreach(var value in _consumerDictionary.Values) value.
+                var consumerClearingTask = Task.Run(async () =>
+                {
+                    foreach (var consumer in _consumerDictionary.Values)
+                    {
+                        await consumer.CloseAsync();
+
+                        await consumer.DisposeAsync();
+                    }
+
+                    _consumerDictionary.Clear();
+                },
+                CancellationToken.None);
+
+                var producerClearingTask = Task.Run(async () =>
+                {
+                    foreach (var producer in _producerDictionary.Values)
+                    {
+                        await producer.Producer.FlushAsync();
+
+                        await producer.Producer.DisposeAsync();
+                    }
+
+                    _producerDictionary.Clear();
+                },
+                CancellationToken.None);
+
+                await Task.WhenAll(producerClearingTask, consumerClearingTask);
+
+                _router.Dispose();
+
+                _cts.Dispose();
             }
         }
 
         public void StopService() => _cts.Cancel();
 
-        private void RegisterProducersTasks()
+        private void RegisterProducersTasks(CancellationToken ct)
         {
             if (_producerDictionary.IsEmpty) return;
 
@@ -189,7 +214,7 @@ namespace DeKaSharp
 
                         var kafkaProducer = producer.Producer;
 
-                        await foreach(var item in _router.GetChannelById(idKey).Reader.ReadAllAsync())
+                        await foreach(var item in _router.GetChannelById(idKey).Reader.ReadAllAsync(ct))
                         {
                             var messageKey = item.MessageKey;
 
@@ -197,16 +222,14 @@ namespace DeKaSharp
 
                             await kafkaProducer.FireAsync(topicName, messageKey, messageValue);
                         }
-                    }
-                );
+                    }, 
+                    ct);
 
                 _producerTasks.Add(producerTask);
             }
         }
 
-
-
-        private void RegisterConsumersTasks()
+        private void RegisterConsumersTasks(CancellationToken ct)
         {
             if (_producerDictionary.IsEmpty) return;
 

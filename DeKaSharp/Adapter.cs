@@ -7,7 +7,7 @@ namespace DeKaSharp
     {
         private static readonly BrokerClientService _brokerHandler;
 
-        private static readonly Lock _locker = new Lock();
+        private static readonly Lock _strartLocker = new();
 
         private static bool _startIsBlocked = false;
 
@@ -17,6 +17,7 @@ namespace DeKaSharp
 
             _startIsBlocked = false;
         }
+
 
         [UnmanagedCallersOnly(EntryPoint = "BuildProducer", CallConvs = new[] { typeof(CallConvStdcall) })]
         public static IntPtr BuildProducer(IntPtr serverId, IntPtr topic)
@@ -77,7 +78,7 @@ namespace DeKaSharp
         [UnmanagedCallersOnly(EntryPoint = "StartService", CallConvs = new[] { typeof(CallConvStdcall) })]
         public static void Start() 
         {
-            lock (_locker)
+            lock (_strartLocker)
             {
                 if(_startIsBlocked) return;
 
@@ -94,12 +95,13 @@ namespace DeKaSharp
             }
         }
 
+
         [UnmanagedCallersOnly(EntryPoint = "StopService", CallConvs = new[] { typeof(CallConvStdcall) })]
         public static void Stop()
         {
             try
             {
-
+                _brokerHandler.StopService();
             }
             catch (Exception ex)
             {
@@ -107,11 +109,34 @@ namespace DeKaSharp
             }
         }
 
+
         [UnmanagedCallersOnly(EntryPoint = "Produce", CallConvs = new[] { typeof(CallConvStdcall) })]
-        public static void Produce()
-        { 
-        
+        public static void Produce(IntPtr producerId, IntPtr messageKey, IntPtr messageValue)
+        {
+            try
+            {
+                Span<IntPtr> pointerSpan = [producerId, messageKey, messageValue];
+
+                if (pointerSpan.HasNull()) throw new ArgumentException("Передан пустой указатель");
+
+                var id = Marshal.PtrToStringAnsi(producerId);
+
+                var key = Marshal.PtrToStringAnsi(messageKey);
+
+                var value = Marshal.PtrToStringAnsi(messageValue);
+
+                var inputMethod = _brokerHandler.InputData();
+
+                var message = new InputMessage(id!, key!, value!);
+
+                inputMethod(message);
+            }
+            catch(Exception)
+            {
+
+            }
         }
+
 
         [UnmanagedCallersOnly(EntryPoint = "Consume", CallConvs = new[] { typeof(CallConvStdcall) })]
         public static void Consume()
