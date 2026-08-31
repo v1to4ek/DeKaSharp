@@ -23,8 +23,6 @@ namespace DeKaSharp
 
         private ServiceProcessorsState _serviceState;
 
-        public delegate void PublisherDelegate(InputMessage message);
-
         private record class ProducerWrapper<TKey, TValue>
         {
             public required IKafkaProducer<TKey, TValue> Producer { get; set; }
@@ -58,7 +56,7 @@ namespace DeKaSharp
             _router = new ProducingRouter();
         }
 
-        public PublisherDelegate InputData() => _router.PublishItem;
+        public bool InputData(InputMessage message) => _router.PublishItem(message);
 
         public string AddProducer(string serverId, string topicName)
         {
@@ -68,7 +66,10 @@ namespace DeKaSharp
             {
                 Producer = Kafka.CreateProducer<string, string>()
                 .WithBootstrapServers(serverId)
-                .Build(),
+                .BuildAsync()
+                .AsTask()
+                .GetAwaiter()
+                .GetResult(),
                 TopicName = topicName
             };
 
@@ -139,9 +140,9 @@ namespace DeKaSharp
 
                 await generalTask;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-
+                Logger.Log(ex.Message);
             }
             finally
             {
@@ -207,21 +208,31 @@ namespace DeKaSharp
 
                 var producer = kvPair.Value;
 
+                var channel = _router.GetChannelById(idKey);
+
                 var producerTask = Task.Run(
                     async () =>
                     {
-                        var topicName = producer.TopicName;
-
-                        var kafkaProducer = producer.Producer;
-
-                        await foreach(var item in _router.GetChannelById(idKey).Reader.ReadAllAsync(ct))
+                        try
                         {
-                            var messageKey = item.MessageKey;
+                            var topicName = producer.TopicName;
 
-                            var messageValue = item.MessageValue;
+                            var kafkaProducer = producer.Producer;
 
-                            await kafkaProducer.FireAsync(topicName, messageKey, messageValue);
+                            await foreach (var item in channel.Reader.ReadAllAsync(ct))
+                            {
+                                var messageKey = item.MessageKey;
+
+                                var messageValue = item.MessageValue;
+
+                                await kafkaProducer.ProduceAsync(topicName, messageKey, messageValue);
+                            }
                         }
+                        catch(Exception ex)
+                        {
+                            Logger.Log(ex.Message);
+                        }
+
                     }, 
                     ct);
 

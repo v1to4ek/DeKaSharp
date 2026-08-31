@@ -18,7 +18,14 @@ namespace DeKaSharp
 
         public void RegisterChannel(string id) => _outputChannels.TryAdd(id, Channel.CreateUnbounded<OutputMessage>());
 
-        public void PublishItem(InputMessage message) => _inputChannel.Writer.TryWrite(message);
+        public bool PublishItem(InputMessage message)
+        {
+            if (_inputChannel.Writer.TryWrite(message))
+            {
+                return true;
+            }
+            else return false;
+        }
 
         public Channel<OutputMessage> GetChannelById(string id) => _outputChannels[id];
 
@@ -34,7 +41,7 @@ namespace DeKaSharp
                     }
                     else
                     {
-                        Console.WriteLine("Канала нет");
+                        Logger.Log($"Не найден канал для id: {item.Id}");
                     }
                 }
             }, ct);

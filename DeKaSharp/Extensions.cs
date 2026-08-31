@@ -11,6 +11,11 @@ namespace DeKaSharp
             foreach (var item in dataSpan)
             {
                 if (item is null) return true;
+
+                if (item is IntPtr ptr)
+                {
+                    if (ptr == IntPtr.Zero) return true;
+                }
             }
             return false;
         }

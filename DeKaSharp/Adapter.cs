@@ -34,14 +34,17 @@ namespace DeKaSharp
 
                 var producerId = _brokerHandler.AddProducer(serverHost!, topicName!);
 
-                var ptr = Marshal.StringToCoTaskMemUni(producerId);
+                var ptr = Marshal.StringToCoTaskMemAnsi(producerId);
 
                 return ptr;
             }
             catch(Exception ex)
             {
-                //сделать лог ошибки
-                return IntPtr.Zero;
+                Logger.Log(ex.Message);
+
+                var ptr = Marshal.StringToCoTaskMemAnsi("err");
+
+                return ptr;
             }
         }
 
@@ -63,24 +66,25 @@ namespace DeKaSharp
 
                 var consumerId = _brokerHandler.AddConsumer(serverHost!, groupName!, topicName!);
 
-                var ptr = Marshal.StringToCoTaskMemUni(consumerId);
+                var ptr = Marshal.StringToCoTaskMemAnsi(consumerId);
 
                 return ptr;
             }
             catch(Exception ex)
             {
-                //сделать лог ошибки
+                Logger.Log(ex.Message);
+
                 return IntPtr.Zero;
             }
         }
 
 
         [UnmanagedCallersOnly(EntryPoint = "StartService", CallConvs = new[] { typeof(CallConvStdcall) })]
-        public static void Start() 
+        public static IntPtr Start() 
         {
             lock (_strartLocker)
             {
-                if(_startIsBlocked) return;
+                if(_startIsBlocked) return Marshal.StringToCoTaskMemAnsi("err");
 
                 _startIsBlocked = true;
             }
@@ -88,30 +92,45 @@ namespace DeKaSharp
             try
             {
                 _ = _brokerHandler.StartServiceAsync();
+
+                var ptr = Marshal.StringToCoTaskMemAnsi("ok");
+
+                return ptr;
             }
             catch(Exception ex)
             {
+                var ptr = Marshal.StringToCoTaskMemAnsi("err");
 
+                return ptr;
             }
         }
 
 
         [UnmanagedCallersOnly(EntryPoint = "StopService", CallConvs = new[] { typeof(CallConvStdcall) })]
-        public static void Stop()
+        public static IntPtr Stop()
         {
             try
             {
                 _brokerHandler.StopService();
+
+                lock (_strartLocker)
+                {
+                    if (_startIsBlocked) _startIsBlocked = false;
+                }
+
+                return Marshal.StringToCoTaskMemAnsi("ok");
             }
             catch (Exception ex)
             {
+                var ptr = Marshal.StringToCoTaskMemAnsi("err");
 
+                return ptr;
             }
         }
 
 
         [UnmanagedCallersOnly(EntryPoint = "Produce", CallConvs = new[] { typeof(CallConvStdcall) })]
-        public static void Produce(IntPtr producerId, IntPtr messageKey, IntPtr messageValue)
+        public static IntPtr Produce(IntPtr producerId, IntPtr messageKey, IntPtr messageValue)
         {
             try
             {
@@ -125,15 +144,22 @@ namespace DeKaSharp
 
                 var value = Marshal.PtrToStringAnsi(messageValue);
 
-                var inputMethod = _brokerHandler.InputData();
-
                 var message = new InputMessage(id!, key!, value!);
 
-                inputMethod(message);
+                var success = _brokerHandler.InputData(message);
+
+                if (success)
+                {
+                    return Marshal.StringToCoTaskMemAnsi("ok");
+                }
+                else
+                {
+                    return Marshal.StringToCoTaskMemAnsi("not sent");
+                }
             }
             catch(Exception)
             {
-
+                return Marshal.StringToCoTaskMemAnsi("err");
             }
         }
 
