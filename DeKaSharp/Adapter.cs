@@ -18,7 +18,6 @@ namespace DeKaSharp
             _startIsBlocked = false;
         }
 
-
         [UnmanagedCallersOnly(EntryPoint = "BuildProducer", CallConvs = new[] { typeof(CallConvStdcall) })]
         public static IntPtr BuildProducer(IntPtr serverId, IntPtr topic)
         {
@@ -84,9 +83,16 @@ namespace DeKaSharp
         {
             lock (_strartLocker)
             {
-                if(_startIsBlocked) return Marshal.StringToCoTaskMemAnsi("err");
+                if (_startIsBlocked)
+                {
+                    Logger.Log("Сервис не запущен из-за блокировки (startIsBlocked) ");
+
+                    return Marshal.StringToCoTaskMemAnsi("err");
+                }
 
                 _startIsBlocked = true;
+
+                Logger.Log("Старт сервиса заблокирован в адаптере (startIsBlocked)");
             }
             
             try
@@ -99,9 +105,17 @@ namespace DeKaSharp
             }
             catch(Exception ex)
             {
+                Logger.Log(ex.Message);
+
                 var ptr = Marshal.StringToCoTaskMemAnsi("err");
 
                 return ptr;
+            }
+            finally
+            {
+                _startIsBlocked = false;
+
+                Logger.Log("Блокировка на старт сервиса снята");
             }
         }
 
@@ -116,12 +130,16 @@ namespace DeKaSharp
                 lock (_strartLocker)
                 {
                     if (_startIsBlocked) _startIsBlocked = false;
+
+                    Logger.Log("Блокировка на старт сервиса снята");
                 }
 
                 return Marshal.StringToCoTaskMemAnsi("ok");
             }
             catch (Exception ex)
             {
+                Logger.Log(ex.Message);
+
                 var ptr = Marshal.StringToCoTaskMemAnsi("err");
 
                 return ptr;

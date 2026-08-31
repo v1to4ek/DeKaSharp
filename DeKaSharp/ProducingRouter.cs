@@ -16,7 +16,13 @@ namespace DeKaSharp
             _outputChannels = [];
         }
 
-        public void RegisterChannel(string id) => _outputChannels.TryAdd(id, Channel.CreateUnbounded<OutputMessage>());
+        public void RegisterChannel(string id)
+        {
+             var added = _outputChannels.TryAdd(id, Channel.CreateUnbounded<OutputMessage>());
+
+            if (added) Logger.Log($"Добавлен канал с id: {id}");
+            else throw new Exception($"Ошибка добавления канала с id: {id}");
+        }
 
         public bool PublishItem(InputMessage message)
         {
@@ -31,7 +37,7 @@ namespace DeKaSharp
 
         public Task Start(CancellationToken ct)
         {
-            return Task.Run(async () =>
+            var routerTask = Task.Run(async () =>
             {
                 await foreach (var item in _inputChannel.Reader.ReadAllAsync(ct))
                 {
@@ -42,9 +48,14 @@ namespace DeKaSharp
                     else
                     {
                         Logger.Log($"Не найден канал для id: {item.Id}");
+
                     }
                 }
             }, ct);
+
+            Logger.Log("Запущен сервис роутера");
+
+            return routerTask;
         }
 
         public void Dispose()

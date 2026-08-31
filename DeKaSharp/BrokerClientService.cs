@@ -15,13 +15,15 @@ namespace DeKaSharp
 
         private readonly List<Task> _producerTasks;
 
-        private readonly CancellationTokenSource _cts;
-
-        private readonly ProducingRouter _router;
-
         private readonly Lock _stateLocker;
 
-        private ServiceProcessorsState _serviceState;
+        private ProducingRouter _router;
+
+        private CancellationTokenSource _cts;
+
+        private ServiceState _serviceState;
+
+        private bool _stopped;
 
         private record class ProducerWrapper<TKey, TValue>
         {
@@ -30,7 +32,7 @@ namespace DeKaSharp
             public required string TopicName { get; set; }
         }
 
-        private enum ServiceProcessorsState
+        private enum ServiceState
         {
             Empty,
             OnlyProducersRegistered,
@@ -43,8 +45,6 @@ namespace DeKaSharp
         {
             _stateLocker = new Lock();
 
-            _cts = new CancellationTokenSource();
-
             _producerDictionary = [];
 
             _consumerDictionary = [];
@@ -53,13 +53,39 @@ namespace DeKaSharp
 
             _producerTasks = [];
 
+            _stopped = false;
+
+            _cts = new CancellationTokenSource();
+
             _router = new ProducingRouter();
+
+            Logger.Log("Создан сервис брокера");
         }
 
-        public bool InputData(InputMessage message) => _router.PublishItem(message);
+        public bool InputData(InputMessage message)
+        {
+            if(_serviceState == ServiceState.Empty)
+            {
+                Logger.Log($"Некорректное состояние свервиса {ServiceState.Empty}");
+                return false;
+            }
+
+            if(_consumerDictionary.ContainsKey(message.Id) || _producerDictionary.ContainsKey(message.Id))
+            {
+                _router.PublishItem(message);
+                return true;
+            }
+            else
+            {
+                Logger.Log($"Канал с id: {message.Id} не найден");
+                return false;
+            }
+        }
 
         public string AddProducer(string serverId, string topicName)
         {
+            if (_serviceState != ServiceState.Empty) throw new InvalidOperationException("Невозможно добавить продьюсер после запуска сервиса");
+
             var producerId = Guid.NewGuid().ToString();
 
             var producer = new ProducerWrapper<string, string>
@@ -73,7 +99,10 @@ namespace DeKaSharp
                 TopicName = topicName
             };
 
-            _producerDictionary.TryAdd(producerId, producer);
+            var added = _producerDictionary.TryAdd(producerId, producer);
+
+            if (added) Logger.Log($"Добавлен продьюссер с id: {producerId}");
+            else throw new Exception("Ошибка добавления продьюссера в коллекцию");
 
             _router.RegisterChannel(producerId);
 
@@ -82,32 +111,58 @@ namespace DeKaSharp
 
         public string AddConsumer(string server, string group, string topic)
         {
+            if (_serviceState != ServiceState.Empty) throw new InvalidOperationException("Невозможно добавить консъюмер после запуска сервиса");
+
             var consumerId = Guid.NewGuid().ToString();
 
             _consumerDictionary.TryAdd(consumerId, Kafka.CreateConsumer<string, string>()
                 .WithBootstrapServers(server)
                 .WithGroupId(group)
                 .SubscribeTo(topic)
-                .Build());
+                .BuildAsync()
+                .AsTask()
+                .GetAwaiter()
+                .GetResult());
 
             return consumerId;
         }
 
         public async Task StartServiceAsync()
         {
+            Logger.Log("Запуск сервиса брокера");
+
+            if (_serviceState != ServiceState.Empty) throw new Exception("Сервис уже запущен");
+
+            lock (_stateLocker)
+            {
+                if (_stopped)
+                {
+                    Logger.Log("Ранее сервис был остановлен: пересоздание зависимостей");
+
+                    _cts = new CancellationTokenSource();
+
+                    _router = new ProducingRouter();
+
+                    _stopped = false;
+                }
+            }
+
             var stoppingToken = _cts.Token;
-            
+
+            Logger.Log($"Запуск {_producerDictionary.Count} обработчиков-продьюсеров");
             RegisterProducersTasks(stoppingToken);
 
+            Logger.Log($"Запуск {_consumerDictionary.Count} обработчиков-консъюмеров");
             RegisterConsumersTasks(stoppingToken);
 
             var exceptionalState = false;
 
+            Logger.Log($"Запуск сервиса роутера");
             var routerTask = _router.Start(stoppingToken);
 
             Task generalTask;
 
-            if(_serviceState == ServiceProcessorsState.AllRegistered)
+            if(_serviceState == ServiceState.AllRegistered)
             {
                 var consumersTasks = Task.WhenAll(_consumerTasks);
 
@@ -115,13 +170,13 @@ namespace DeKaSharp
 
                 generalTask = Task.WhenAll(consumersTasks, producersTasks, routerTask);
             }
-            else if(_serviceState == ServiceProcessorsState.OnlyProducersRegistered)
+            else if(_serviceState == ServiceState.OnlyProducersRegistered)
             {
                 var producersTasks = Task.WhenAll(_producerTasks);
 
                 generalTask = Task.WhenAll(producersTasks, routerTask);
             }
-            else if(_serviceState == ServiceProcessorsState.OnlyConsumersRegistered)
+            else if(_serviceState == ServiceState.OnlyConsumersRegistered)
             {
                 var consumersTasks = Task.WhenAll(_consumerTasks);
 
@@ -129,6 +184,8 @@ namespace DeKaSharp
             }
             else
             {
+                Logger.Log($"Обнаружено исключительное состояние: {_serviceState}");
+
                 exceptionalState = true;
 
                 generalTask = Task.CompletedTask;
@@ -136,7 +193,9 @@ namespace DeKaSharp
 
             try
             {
-                if (exceptionalState) throw new Exception();
+                if (exceptionalState) throw new Exception("Недопустимое состояние сервиса брокера");
+
+                _serviceState = ServiceState.Started;
 
                 await generalTask;
             }
@@ -146,6 +205,8 @@ namespace DeKaSharp
             }
             finally
             {
+                Logger.Log("Остановка сервиса, финализация зависимостей");
+
                 var consumerClearingTask = Task.Run(async () =>
                 {
                     foreach (var consumer in _consumerDictionary.Values)
@@ -156,6 +217,8 @@ namespace DeKaSharp
                     }
 
                     _consumerDictionary.Clear();
+
+                    Logger.Log("Словарь консъюмеров очищен");
                 },
                 CancellationToken.None);
 
@@ -169,14 +232,24 @@ namespace DeKaSharp
                     }
 
                     _producerDictionary.Clear();
+
+                    Logger.Log("Словарь продьюсеров очищен");
                 },
                 CancellationToken.None);
 
                 await Task.WhenAll(producerClearingTask, consumerClearingTask);
 
                 _router.Dispose();
+                Logger.Log("Каналы роутера очищены");
 
                 _cts.Dispose();
+                Logger.Log("Токен отмены очищен");
+
+                _serviceState = ServiceState.Empty;
+
+                _stopped = true;
+
+                Logger.Log("Сервис остановлен");
             }
         }
 
@@ -188,17 +261,17 @@ namespace DeKaSharp
 
             lock (_stateLocker)
             {
-                if(_serviceState == ServiceProcessorsState.Empty)
+                if(_serviceState == ServiceState.Empty)
                 {
-                    _serviceState = ServiceProcessorsState.OnlyProducersRegistered;
+                    _serviceState = ServiceState.OnlyProducersRegistered;
                 }
-                if(_serviceState == ServiceProcessorsState.OnlyConsumersRegistered)
+                if(_serviceState == ServiceState.OnlyConsumersRegistered)
                 {
-                    _serviceState = ServiceProcessorsState.AllRegistered;
+                    _serviceState = ServiceState.AllRegistered;
                 }
-                if(_serviceState == ServiceProcessorsState.Started)
+                if(_serviceState == ServiceState.Started)
                 {
-                    throw new InvalidOperationException();
+                    throw new InvalidOperationException("Невозможна регистрация новых обработчиков при запущенном потоке сервиса");
                 }
             }
 
@@ -237,6 +310,8 @@ namespace DeKaSharp
                     ct);
 
                 _producerTasks.Add(producerTask);
+
+                Logger.Log($"Зарегистрирован асинхронный обработчик для id: {idKey}");
             }
         }
 
@@ -246,15 +321,15 @@ namespace DeKaSharp
 
             lock (_stateLocker)
             {
-                if (_serviceState == ServiceProcessorsState.Empty)
+                if (_serviceState == ServiceState.Empty)
                 {
-                    _serviceState = ServiceProcessorsState.OnlyConsumersRegistered;
+                    _serviceState = ServiceState.OnlyConsumersRegistered;
                 }
-                if (_serviceState == ServiceProcessorsState.OnlyProducersRegistered)
+                if (_serviceState == ServiceState.OnlyProducersRegistered)
                 {
-                    _serviceState = ServiceProcessorsState.AllRegistered;
+                    _serviceState = ServiceState.AllRegistered;
                 }
-                if (_serviceState == ServiceProcessorsState.Started)
+                if (_serviceState == ServiceState.Started)
                 {
                     throw new InvalidOperationException();
                 }
