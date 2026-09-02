@@ -97,7 +97,12 @@ namespace DeKaSharp
             
             try
             {
-                _ = _brokerHandler.StartServiceAsync();
+                _ = _brokerHandler.StartServiceAsync(() =>
+                {
+                    _startIsBlocked = false;
+
+                    Logger.Log("Блокировка на старт сервиса снята через коллбэк");
+                });
 
                 var ptr = Marshal.StringToCoTaskMemAnsi("ok");
 
@@ -109,13 +114,11 @@ namespace DeKaSharp
 
                 var ptr = Marshal.StringToCoTaskMemAnsi("err");
 
-                return ptr;
-            }
-            finally
-            {
                 _startIsBlocked = false;
 
                 Logger.Log("Блокировка на старт сервиса снята");
+
+                return ptr;
             }
         }
 

@@ -25,6 +25,8 @@ namespace DeKaSharp
 
         private bool _stopped;
 
+        public delegate void StoppingCallbackDelegate();
+
         private record class ProducerWrapper<TKey, TValue>
         {
             public required IKafkaProducer<TKey, TValue> Producer { get; set; }
@@ -127,14 +129,14 @@ namespace DeKaSharp
             return consumerId;
         }
 
-        public async Task StartServiceAsync()
+        public async Task StartServiceAsync(StoppingCallbackDelegate stoppingCallback)
         {
             Logger.Log("Запуск сервиса брокера");
 
-            if (_serviceState != ServiceState.Empty) throw new Exception("Сервис уже запущен");
-
             lock (_stateLocker)
             {
+                if (_serviceState != ServiceState.Empty) throw new Exception("Сервис уже запущен");
+
                 if (_stopped)
                 {
                     Logger.Log("Ранее сервис был остановлен: пересоздание зависимостей");
@@ -250,10 +252,28 @@ namespace DeKaSharp
                 _stopped = true;
 
                 Logger.Log("Сервис остановлен");
+
+                Logger.Log("Вызов коллбэка сброса блокировки");
+
+                stoppingCallback.Invoke();
             }
         }
 
-        public void StopService() => _cts.Cancel();
+        public void StopService()
+        {
+            if (_stopped)
+            {
+                Logger.Log("Сервис уже остановлен - пропуск операции остановки - выброс исключения");
+
+                throw new InvalidOperationException("Невалидная операция остановки сервиса, когда он остановлен");
+            }
+            else
+            {
+                _cts.Cancel();
+
+                Logger.Log("Остановка сервиса (cts.Cancel)");
+            }
+        }
 
         private void RegisterProducersTasks(CancellationToken ct)
         {
