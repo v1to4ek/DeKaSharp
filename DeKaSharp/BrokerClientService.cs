@@ -17,7 +17,7 @@ namespace DeKaSharp
 
         private readonly Lock _stateLocker;
 
-        private ProducingRouter _router;
+        private InputRouter _router;
 
         private CancellationTokenSource _cts;
 
@@ -59,7 +59,7 @@ namespace DeKaSharp
 
             _cts = new CancellationTokenSource();
 
-            _router = new ProducingRouter();
+            _router = new InputRouter();
 
             Logger.Log("Создан сервис брокера");
         }
@@ -143,7 +143,7 @@ namespace DeKaSharp
 
                     _cts = new CancellationTokenSource();
 
-                    _router = new ProducingRouter();
+                    _router = new InputRouter();
 
                     _stopped = false;
                 }

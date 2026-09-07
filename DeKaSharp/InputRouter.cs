@@ -3,13 +3,13 @@ using System.Threading.Channels;
 
 namespace DeKaSharp
 {
-    internal class ProducingRouter : IDisposable
+    internal class InputRouter 
     {
         private readonly Channel<InputMessage> _inputChannel;
 
         private readonly ConcurrentDictionary<string, Channel<OutputMessage>> _outputChannels;
 
-        public ProducingRouter()
+        public InputRouter()
         {
             _inputChannel = Channel.CreateUnbounded<InputMessage>();
 
@@ -18,7 +18,7 @@ namespace DeKaSharp
 
         public void RegisterChannel(string id)
         {
-             var added = _outputChannels.TryAdd(id, Channel.CreateUnbounded<OutputMessage>());
+            var added = _outputChannels.TryAdd(id, Channel.CreateUnbounded<OutputMessage>());
 
             if (added) Logger.Log($"Добавлен канал с id: {id}");
             else throw new Exception($"Ошибка добавления канала с id: {id}");
@@ -58,7 +58,7 @@ namespace DeKaSharp
             return routerTask;
         }
 
-        public void Dispose()
+        public void Clear()
         {
             _inputChannel.Writer.Complete();
 

@@ -1,0 +1,65 @@
+﻿using Dekaf.Consumer;
+using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace DeKaSharp.BrokerTaskBuilder.Containers
+{
+    internal class ConsumerTaskContainer : IBrokerTaskContainer
+    {
+        private readonly string _id;
+
+        private readonly IKafkaConsumer<string, string> _consumer;
+
+        private readonly Action<string, string> _outputCallback;
+
+        private readonly CancellationToken _ct;
+
+        public string Id => _id;
+
+        public ConsumerTaskContainer(string id,
+            IKafkaConsumer<string, string> consumer,
+            Action<string, string> outputCallback,
+            CancellationToken ct)
+        {
+            _id = id;
+
+            _consumer = consumer;
+
+            _ct = ct;
+
+            _outputCallback = outputCallback;
+
+            Logger.Log($"Создан контейнер консьюмера c id: {_id}");
+        }
+
+        //можно передать коллбэк для возврата ошибки
+        //можно добавить вариант возврата значеня не через коллбэк, а писать к примеру в канал, который будет читаться в другом месте
+        public Func<Task> GetTaskAction()
+            => () => Task
+            .Factory
+            .StartNew(async () =>
+            {
+                try
+                {
+                    await foreach (var message in _consumer.ConsumeAsync(_ct))
+                    {
+                        var messageKey = message.Key ?? "null data";
+
+                        var messageValue = message.Value ?? "null data";
+
+                        _outputCallback.Invoke(messageKey, messageValue);
+
+                        Logger.Log($"Получено сообщение. Время: {message.Timestamp}. Топик: {message.Topic}. Ключ: {messageKey}. Значение: {messageValue}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log($"Поймано исключение в таске консъюмера c id: {_id} : {ex.Message}");
+                }
+            },
+            _ct,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default).Unwrap();
+    }
+}
