@@ -1,4 +1,5 @@
 ﻿using Dekaf.Consumer;
+using Dekaf.Errors;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -17,6 +18,8 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
 
         public string Id => _id;
 
+        public BrokerTaskType Type => BrokerTaskType.Consumer;
+
         public ConsumerTaskContainer(string id,
             IKafkaConsumer<string, string> consumer,
             Action<string, string> outputCallback,
@@ -30,36 +33,35 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
 
             _outputCallback = outputCallback;
 
-            Logger.Log($"Создан контейнер консьюмера c id: {_id}");
+            Logger.Log($"Создан контейнер консъюмера c id: {_id}");
         }
 
         //можно передать коллбэк для возврата ошибки
         //можно добавить вариант возврата значеня не через коллбэк, а писать к примеру в канал, который будет читаться в другом месте
         public Func<Task> GetTaskAction()
-            => () => Task
-            .Factory
-            .StartNew(async () =>
-            {
-                try
+            => () => Task.Run(
+                async () =>
                 {
-                    await foreach (var message in _consumer.ConsumeAsync(_ct))
+                    Logger.Log($"Вход в асинхронную задачу консъюмера с id: {_id} ");
+
+                    try
                     {
-                        var messageKey = message.Key ?? "null data";
+                        await foreach (var message in _consumer.ConsumeAsync(_ct))
+                        {
+                            var messageKey = message.Key ?? "null data";
 
-                        var messageValue = message.Value ?? "null data";
+                            var messageValue = message.Value ?? "null data";
 
-                        _outputCallback.Invoke(messageKey, messageValue);
+                            _outputCallback.Invoke(messageKey, messageValue);
 
-                        Logger.Log($"Получено сообщение. Время: {message.Timestamp}. Топик: {message.Topic}. Ключ: {messageKey}. Значение: {messageValue}");
+                            Logger.Log($"Получено сообщение. Время: {message.Timestamp}. Топик: {message.Topic}. Ключ: {messageKey}. Значение: {messageValue}");
+                        }
                     }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Log($"Поймано исключение в таске консъюмера c id: {_id} : {ex.Message}");
-                }
-            },
-            _ct,
-            TaskCreationOptions.LongRunning,
-            TaskScheduler.Default).Unwrap();
+                    catch (ConsumeException ex)
+                    {
+                        Logger.Log($"Поймано исключение в таске консъюмера c id: {_id} : {ex.Message}");
+                    }
+                },
+                _ct);
     }
 }

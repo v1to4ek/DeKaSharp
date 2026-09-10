@@ -8,42 +8,58 @@ namespace DeKaSharp
     {
         private CancellationTokenSource? _tokenSource;
 
-        public TokenGenerator() => _tokenSource = null;
+        private readonly Lock _locker;
+
+        public TokenGenerator()
+        {
+            _tokenSource = null; 
+
+            _locker = new ();
+        }
 
         public CancellationToken GetOrCreateAndGet()
         {
-            if (_tokenSource == null)
+            lock(_locker)
             {
-                _tokenSource = new CancellationTokenSource();
+                if (_tokenSource == null)
+                {
+                    _tokenSource = new CancellationTokenSource();
 
-                Logger.Log("Создан источник токена отмены");
+                    Logger.Log("Создан источник токена отмены");
+                }
+
+                var token = _tokenSource.Token;
+
+                Logger.Log("Получен токен отмены");
+
+                return token;
             }
-
-            var token = _tokenSource.Token;
-
-            Logger.Log("Получен токен отмены");
-
-            return token;
         }
 
         public void Cancel()
         {
-            if (_tokenSource == null) throw new InvalidOperationException("Не создан источник токена отмены");
+            lock(_locker)
+            {
+                if (_tokenSource == null) throw new InvalidOperationException("Не создан источник токена отмены");
 
-            _tokenSource.Cancel();
+                _tokenSource.Cancel();
 
-            Logger.Log("Токен отменён");
+                Logger.Log("Токен отменён");
+            }
         }
 
         public void Clear()
         {
-            if (_tokenSource == null) throw new InvalidOperationException("Не создан источник токена отмены");
+            lock (_locker)
+            {
+                if (_tokenSource == null) throw new InvalidOperationException("Не создан источник токена отмены");
 
-            _tokenSource.Dispose();
+                _tokenSource.Dispose();
 
-            _tokenSource = null;
+                _tokenSource = null;
 
-            Logger.Log("Токен очищен");
+                Logger.Log("Токен очищен");
+            }
         }
     }
 }

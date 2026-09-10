@@ -160,7 +160,7 @@ namespace DeKaSharp
             var exceptionalState = false;
 
             Logger.Log($"Запуск сервиса роутера");
-            var routerTask = _router.Start(stoppingToken);
+            var routerTask = _router.RunAsync(stoppingToken);
 
             Task generalTask;
 

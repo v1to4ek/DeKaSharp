@@ -1,4 +1,5 @@
-﻿using Dekaf.Producer;
+﻿using Dekaf.Errors;
+using Dekaf.Producer;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -18,6 +19,8 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
         private readonly CancellationToken _ct;
 
         public string Id => _id;
+
+        public BrokerTaskType Type => BrokerTaskType.Producer;
 
         public ProducerTaskContainer(string id,
             string topic,
@@ -41,32 +44,32 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
         //можно передать коллбэк для возврата ошибки
         //можно добавить вариант чтения из коллбека, а не из канала
         public Func<Task> GetTaskAction()
-            => () => Task
-            .Factory
-            .StartNew(async () =>
-            {
-                try
+            => () => Task.Run(
+                async () =>
                 {
-                    var channel = _router.GetChannelById(_id);
+                    Logger.Log($"Вход в асинхронную задачу продьюсера с id: {_id} ");
 
-                    await foreach (var item in channel.Reader.ReadAllAsync(_ct))
+                    try
                     {
-                        var mesKey = item.MessageKey;
+                        var channel = _router.GetChannelById(_id);
 
-                        var mesValue = item.MessageValue;
+                        await foreach (var item in channel.Reader.ReadAllAsync(_ct))
+                        {
+                            var mesKey = item.MessageKey;
 
-                        var data = await _producer.ProduceAsync(_topic, mesKey, mesValue);
+                            var mesValue = item.MessageValue;
 
-                        Logger.Log($"Отправлено сообщение. Время: {data.Timestamp}. Топик: {data.Topic}");
+                            var data = await _producer.ProduceAsync(_topic, mesKey, mesValue);
+
+                            Logger.Log($"Отправлено сообщение. Время: {data.Timestamp}. Топик: {data.Topic}");
+                        }
                     }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Log($"Поймано исключение в таске продьюсера c id: {_id} : {ex.Message}");
-                }
-            },
-            _ct,
-            TaskCreationOptions.LongRunning,
-            TaskScheduler.Default).Unwrap();
+                    catch (ProduceException ex)
+                    {
+                        Logger.Log($"Поймано исключение в таске продьюсера c id: {_id} : {ex.Message}");
+                    }
+                },
+                _ct);
+
     }
 }

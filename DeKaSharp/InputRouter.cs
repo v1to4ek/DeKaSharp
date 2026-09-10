@@ -5,13 +5,13 @@ namespace DeKaSharp
 {
     internal class InputRouter 
     {
-        private readonly Channel<InputMessage> _inputChannel;
+        private Channel<InputMessage>? _inputChannel;
 
         private readonly ConcurrentDictionary<string, Channel<OutputMessage>> _outputChannels;
 
         public InputRouter()
         {
-            _inputChannel = Channel.CreateUnbounded<InputMessage>();
+            _inputChannel = null;
 
             _outputChannels = [];
         }
@@ -26,6 +26,8 @@ namespace DeKaSharp
 
         public bool PublishItem(InputMessage message)
         {
+            if (_inputChannel == null) throw new InvalidOperationException("Входной канал не инициализирован: сервис не запущен.");
+
             if (_inputChannel.Writer.TryWrite(message))
             {
                 return true;
@@ -35,8 +37,17 @@ namespace DeKaSharp
 
         public Channel<OutputMessage> GetChannelById(string id) => _outputChannels[id];
 
-        public Task Start(CancellationToken ct)
+        public Task RunAsync(CancellationToken ct)
         {
+            Logger.Log("Запуск сервиса роутера");
+
+            if (_inputChannel == null)
+            {
+                _inputChannel = Channel.CreateUnbounded<InputMessage>();
+
+                Logger.Log("Создан входной канал");
+            }
+
             var routerTask = Task.Run(async () =>
             {
                 await foreach (var item in _inputChannel.Reader.ReadAllAsync(ct))
@@ -60,14 +71,14 @@ namespace DeKaSharp
 
         public void Clear()
         {
-            _inputChannel.Writer.Complete();
+            if( _inputChannel != null) _inputChannel.Writer.Complete();
 
             foreach (var channel in _outputChannels.Values)
             {
                 channel.Writer.Complete();
             }
 
-            _outputChannels.Clear();    
+            _outputChannels.Clear();
         }
     }
 }
