@@ -11,5 +11,7 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
         public string Id { get; }
 
         public Func<Task> GetTaskAction();
+
+        public Task CleanAsync();
     }
 }

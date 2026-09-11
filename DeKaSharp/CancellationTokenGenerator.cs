@@ -4,13 +4,13 @@ using System.Text;
 
 namespace DeKaSharp
 {
-    internal class TokenGenerator
+    internal class CancellationTokenGenerator : IAsyncCleanable
     {
         private CancellationTokenSource? _tokenSource;
 
         private readonly Lock _locker;
 
-        public TokenGenerator()
+        public CancellationTokenGenerator()
         {
             _tokenSource = null; 
 
@@ -48,8 +48,10 @@ namespace DeKaSharp
             }
         }
 
-        public void Clear()
+        private void Clear()
         {
+            Logger.Log("Очистка источника токена отмены");
+
             lock (_locker)
             {
                 if (_tokenSource == null) throw new InvalidOperationException("Не создан источник токена отмены");
@@ -60,6 +62,10 @@ namespace DeKaSharp
 
                 Logger.Log("Токен очищен");
             }
+
+            Logger.Log("Очистка источника токена отмены завершена");
         }
+
+        public Task CleanAsync() => Task.Run(Clear);
     }
 }

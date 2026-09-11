@@ -3,7 +3,7 @@ using System.Threading.Channels;
 
 namespace DeKaSharp
 {
-    internal class InputRouter 
+    internal class InputRouter : IAsyncCleanable
     {
         private Channel<InputMessage>? _inputChannel;
 
@@ -69,9 +69,11 @@ namespace DeKaSharp
             return routerTask;
         }
 
-        public void Clear()
+        private void Clear()
         {
-            if( _inputChannel != null) _inputChannel.Writer.Complete();
+            Logger.Log("Очистка каналов роутера");
+
+            _inputChannel?.Writer.Complete();
 
             foreach (var channel in _outputChannels.Values)
             {
@@ -79,6 +81,10 @@ namespace DeKaSharp
             }
 
             _outputChannels.Clear();
+
+            Logger.Log("Каналы роутера очищены");
         }
+
+        public Task CleanAsync() => Task.Run(Clear);
     }
 }

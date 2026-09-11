@@ -6,9 +6,9 @@ namespace DeKaSharp
 {
     internal static class Logger
     {
-        private static Lock _logLocker = new();
+        private readonly static Lock _logLocker = new();
 
-        private static string _logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"logs.txt");
+        private readonly static string _logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"logs.txt");
 
         static Logger()
         {

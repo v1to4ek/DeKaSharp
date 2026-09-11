@@ -2,7 +2,7 @@
 
 namespace DeKaSharp.BrokerTaskBuilder
 {
-    internal enum BrokerTaskType
+    internal enum BrokerTaskType 
     {
         Producer,
         Consumer,
@@ -15,7 +15,7 @@ namespace DeKaSharp.BrokerTaskBuilder
     Func<Task>? TaskFactory,
     string? ErrorMessage);
 
-    internal class BrokerTaskHandler
+    internal class BrokerTaskHandler : IAsyncCleanable
     {
         private readonly List<IBrokerTaskContainer> _taskContainers;
 
@@ -66,6 +66,18 @@ namespace DeKaSharp.BrokerTaskBuilder
             }
         }
 
+        public Task CleanAsync() => 
+            Task.Run(async () =>
+            {
+                Logger.Log("Очистка контейнеров задач брокера");
 
+                var cleaningTasks = _taskContainers.Select(item => item.CleanAsync());
+
+                await Task.WhenAll(cleaningTasks);
+
+                _taskContainers.Clear();
+
+                Logger.Log("Все контейнеры задач очищены.");
+            });
     }
 }

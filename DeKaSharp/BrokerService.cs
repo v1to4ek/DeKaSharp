@@ -1,10 +1,11 @@
 ﻿using Dekaf;
 using DeKaSharp.BrokerTaskBuilder;
 using DeKaSharp.BrokerTaskBuilder.Containers;
+using System.Reflection.Emit;
 
 namespace DeKaSharp
 {
-    internal class BrokerService
+    internal class BrokerService : IAsyncCleanable
     {
         private readonly List<Task> _brokerTasks;
 
@@ -12,9 +13,11 @@ namespace DeKaSharp
 
         private readonly InputRouter _inputRouter;
 
-        private readonly TokenGenerator _cancellationGenerator;
+        private readonly CancellationTokenGenerator _cancellationGenerator;
 
-        private ServiceState _state;
+        private readonly CleanerService _cleanerService;
+
+        private ServiceState _serviceState;
 
         private enum ServiceState
         {
@@ -25,22 +28,33 @@ namespace DeKaSharp
 
         public BrokerService()
         {
-            _state = ServiceState.Empty;
-
-            _cancellationGenerator = new();
+            _serviceState = ServiceState.Empty;
 
             _brokerTasks = [];
+
+            _cancellationGenerator = new();
 
             _taskHandler = new();
 
             _inputRouter = new();
 
+            _cleanerService = new();
+
+            RegisterServicesForCleaning();
+
             Logger.Log("Создан сервис брокера");
+        }
+
+        private void RegisterServicesForCleaning()
+        {
+            _cleanerService.RegisterItem(_cancellationGenerator);
+            _cleanerService.RegisterItem(_inputRouter);
+            _cleanerService.RegisterItem(_taskHandler);
         }
 
         public string RegisterProducer(string server, string topic)
         {
-            if(_state == ServiceState.Running)
+            if(_serviceState == ServiceState.Running)
             {
                 throw new InvalidOperationException("Невозможно добавить продьюсер в запущенный сервис");
             }
@@ -61,14 +75,14 @@ namespace DeKaSharp
             _taskHandler.AddTaskContainer(
                 () => new ProducerTaskContainer(producerId, topic, producer, _inputRouter, ct));
 
-            _state = ServiceState.Registered;
+            _serviceState = ServiceState.Registered;
 
             return producerId;
         }
 
         public string RegisterConsumer(string server, string group, string topic, Action<string,string> callback)
         {
-            if (_state == ServiceState.Running)
+            if (_serviceState == ServiceState.Running)
             {
                 throw new InvalidOperationException("Невозможно добавить консъюмер в запущенный сервис");
             }
@@ -89,7 +103,7 @@ namespace DeKaSharp
             _taskHandler.AddTaskContainer(
                 () => new ConsumerTaskContainer(consumerId, consumer, callback, ct));
 
-            _state = ServiceState.Registered;
+            _serviceState = ServiceState.Registered;
 
             return consumerId;
         }
@@ -98,11 +112,11 @@ namespace DeKaSharp
         {
             Logger.Log("Запуск сервиса брокера");
 
-            if(_state == ServiceState.Running) throw new InvalidOperationException("Сервис уже запущен");
+            if(_serviceState == ServiceState.Running) throw new InvalidOperationException("Сервис уже запущен");
 
-            if(_state == ServiceState.Empty) throw new InvalidOperationException("Сервис не имеет зарегистрированных продьюсеров или консъюмеров");
+            if(_serviceState == ServiceState.Empty) throw new InvalidOperationException("Сервис не имеет зарегистрированных продьюсеров или консъюмеров");
 
-            _state = ServiceState.Running;
+            _serviceState = ServiceState.Running;
 
             var ct = _cancellationGenerator.GetOrCreateAndGet();
 
@@ -137,11 +151,18 @@ namespace DeKaSharp
             {
                 Logger.Log("Выполнение сервиса было остановлено");
             }
-            catch (Exception)
+            catch(Exception ex)
             {
+                Logger.Log($"Произошла неожиданная ошибка при выполнении сервиса: {ex.Message}. Очистка зависимостей");
+
 
             }
+            finally
+            {
+                Logger.Log("Сервис полностью остановлен");
 
+                _serviceState = ServiceState.Empty;
+            }
         }
 
         private List<(string id, BrokerTaskType type, Func<Task> BuildTask)> LoadTaskFactories()
@@ -185,18 +206,22 @@ namespace DeKaSharp
             return taskFactories;
         }
 
-        private void RunBrokerTasks()
-        {
-
-        }
-
-
         public void StopService()
         {
 
         }
 
+        private async Task StopAsync()
+        {
+
+        }
+
         public void ProduceMessage()
+        {
+
+        }
+
+        public Task CleanAsync()
         {
 
         }

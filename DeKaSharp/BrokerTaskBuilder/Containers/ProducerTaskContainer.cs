@@ -71,5 +71,16 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
                 },
                 _ct);
 
+        public async Task CleanAsync()
+        {
+            var flushTask = _producer.FlushAsync().AsTask();
+
+            var disposeTask = _producer.DisposeAsync().AsTask();
+
+            await Task.WhenAll(flushTask, disposeTask);
+
+            Logger.Log($"Очистка контейнера продьюсера c id: {_id} завершена");
+        }
+
     }
 }
