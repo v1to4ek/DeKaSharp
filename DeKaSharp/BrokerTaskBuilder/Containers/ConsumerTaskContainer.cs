@@ -1,8 +1,5 @@
 ﻿using Dekaf.Consumer;
 using Dekaf.Errors;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace DeKaSharp.BrokerTaskBuilder.Containers
 {
@@ -57,7 +54,13 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
                             Logger.Log($"Получено сообщение. Время: {message.Timestamp}. Топик: {message.Topic}. Ключ: {messageKey}. Значение: {messageValue}");
                         }
                     }
-                    catch (ConsumeException ex)
+                    catch (OperationCanceledException)
+                    {
+                        Logger.Log($"Задача консъюмера с id: {_id} остановлена");
+
+                        throw;
+                    }
+                    catch (Exception ex)
                     {
                         Logger.Log($"Поймано исключение в таске консъюмера c id: {_id} : {ex.Message}");
                     }
@@ -66,11 +69,9 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
 
         public async Task CleanAsync()
         {
-            var closingTask = _consumer.CloseAsync().AsTask();
+            await _consumer.CloseAsync().AsTask();
 
-            var disposeTask = _consumer.DisposeAsync().AsTask();
-
-            await Task.WhenAll(closingTask, disposeTask);
+            await _consumer.DisposeAsync().AsTask();
 
             Logger.Log($"Очистка контейнера консъюмера c id: {_id} завершена");
         }

@@ -26,7 +26,15 @@ namespace DeKaSharp
 
         public bool PublishItem(InputMessage message)
         {
-            if (_inputChannel == null) throw new InvalidOperationException("Входной канал не инициализирован: сервис не запущен.");
+            if (_inputChannel == null)
+            {
+                throw new InvalidOperationException("Входной канал не инициализирован: сервис не запущен.");
+            }
+
+            if (!_outputChannels.ContainsKey(message.Id))
+            {
+                throw new InvalidOperationException($"Не найден канал с id: {message.Id}");
+            }
 
             if (_inputChannel.Writer.TryWrite(message))
             {

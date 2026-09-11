@@ -64,7 +64,13 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
                             Logger.Log($"Отправлено сообщение. Время: {data.Timestamp}. Топик: {data.Topic}");
                         }
                     }
-                    catch (ProduceException ex)
+                    catch (OperationCanceledException)
+                    {
+                        Logger.Log($"Задача продьюсера с id: {_id} остановлена");
+
+                        throw;
+                    }
+                    catch (Exception ex)
                     {
                         Logger.Log($"Поймано исключение в таске продьюсера c id: {_id} : {ex.Message}");
                     }
@@ -73,14 +79,11 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
 
         public async Task CleanAsync()
         {
-            var flushTask = _producer.FlushAsync().AsTask();
+            await _producer.FlushAsync().AsTask();
 
-            var disposeTask = _producer.DisposeAsync().AsTask();
-
-            await Task.WhenAll(flushTask, disposeTask);
+            await _producer.DisposeAsync().AsTask();
 
             Logger.Log($"Очистка контейнера продьюсера c id: {_id} завершена");
         }
-
     }
 }

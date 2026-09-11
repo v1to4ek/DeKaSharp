@@ -34,7 +34,7 @@
             Logger.Log($"Экземпляр {item.GetType().Name} зарегистрирован для очистки с приоритетом {priority}");
         }
 
-        public async Task CleanInstancesParallelAsync()
+        public async Task CleanParallelAsync()
         {
             if (_itemsToClean.Count == 0)
             {
@@ -52,14 +52,22 @@
                 {
                     await cleaningTasks;
                 }
-                catch 
+                catch(Exception ex)
                 {
-                    AggregateException exceptions = cleaningTasks.Exception!;
-
-                    foreach (var ex in exceptions.InnerExceptions)
+                    if(cleaningTasks.Exception != null)
                     {
-                        Logger.Log($"Ошибка при очистке экземпляра: {ex.Message}");
+                        AggregateException exceptions = cleaningTasks.Exception;
+
+                        foreach (var exception in exceptions.InnerExceptions)
+                        {
+                            Logger.Log($"Ошибка при очистке экземпляра: {exception.Message}");
+                        }
                     }
+                    else
+                    {
+                        Logger.Log($"Ошибка при очистке: {ex.Message} ");
+                    }
+
                 }
             }
 

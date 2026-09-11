@@ -1,7 +1,7 @@
 ﻿using Dekaf;
 using DeKaSharp.BrokerTaskBuilder;
 using DeKaSharp.BrokerTaskBuilder.Containers;
-using System.Reflection.Emit;
+using System.Diagnostics.Tracing;
 
 namespace DeKaSharp
 {
@@ -17,7 +17,23 @@ namespace DeKaSharp
 
         private readonly CleanerService _cleanerService;
 
+        private readonly Lock _stoppingLocker;
+
+        private bool _stopping;
+
         private ServiceState _serviceState;
+
+        public event Action<string>? OnServiceStoppedCallback;
+
+        public event Action<string>? OnServiceErrorCallback;
+
+        public event Action<string>? OnTaskErrorCallback;
+
+        public event Action<string, string>? OnConsumeCallback;
+
+        public event Action<string, string>? OnProduceCallback;
+
+        public int CleanerPriority => -1;
 
         private enum ServiceState
         {
@@ -40,6 +56,10 @@ namespace DeKaSharp
 
             _cleanerService = new();
 
+            _stoppingLocker = new();
+
+            _stopping = false;
+
             RegisterServicesForCleaning();
 
             Logger.Log("Создан сервис брокера");
@@ -50,6 +70,7 @@ namespace DeKaSharp
             _cleanerService.RegisterItem(_cancellationGenerator);
             _cleanerService.RegisterItem(_inputRouter);
             _cleanerService.RegisterItem(_taskHandler);
+            _cleanerService.RegisterItem(this);
         }
 
         public string RegisterProducer(string server, string topic)
@@ -153,15 +174,17 @@ namespace DeKaSharp
             }
             catch(Exception ex)
             {
-                Logger.Log($"Произошла неожиданная ошибка при выполнении сервиса: {ex.Message}. Очистка зависимостей");
+                OnServiceErrorCallback?.Invoke($"Зафиксирована ошибка при выполнении сервиса: {ex.Message}");
 
-
+                Logger.Log($"Произошла неожиданная ошибка при выполнении сервиса: {ex.Message}.");
             }
             finally
             {
-                Logger.Log("Сервис полностью остановлен");
+                await ClearAllAsync();
 
-                _serviceState = ServiceState.Empty;
+                OnServiceStoppedCallback?.Invoke($"Зафиксированна остановка сервиса.");
+
+                Logger.Log("Сервис полностью остановлен");
             }
         }
 
@@ -206,24 +229,53 @@ namespace DeKaSharp
             return taskFactories;
         }
 
-        public void StopService()
+        public bool StopService()
         {
+            if(_serviceState != ServiceState.Running)
+            {
+                Logger.Log("Попытка остановки сервиса, который не запущен");
 
+                return false;
+            }
+            else
+            {
+                _cancellationGenerator.Cancel();
+
+                Logger.Log("Запрошена остановка сервиса брокера");
+
+                return true;
+            }
         }
 
-        private async Task StopAsync()
+        private Task ClearAllAsync() => _cleanerService.CleanParallelAsync();
+
+        public bool ProduceMessage(InputMessage message)
         {
+            if(_serviceState != ServiceState.Running)
+            {
+                Logger.Log("Попытка отправки сообщения в сервис, который не запущен");
 
-        }
+                return false;
+            }
+            try
+            {
+                var result = _inputRouter.PublishItem(message);
 
-        public void ProduceMessage()
-        {
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"Ошибка при записи сообщения с id :{message.Id} в канал: {ex.Message}");
 
+                return false;
+            }
         }
 
         public Task CleanAsync()
         {
+            _brokerTasks.Clear();
 
+            return Task.CompletedTask;
         }
     }
 }
