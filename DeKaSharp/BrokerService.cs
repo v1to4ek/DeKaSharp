@@ -29,10 +29,6 @@ namespace DeKaSharp
 
         public event Action<string>? OnTaskErrorCallback;
 
-        public event Action<string, string>? OnConsumeCallback;
-
-        public event Action<string, string>? OnProduceCallback;
-
         public int CleanerPriority => -1;
 
         private enum ServiceState
@@ -247,8 +243,6 @@ namespace DeKaSharp
             }
         }
 
-        private Task ClearAllAsync() => _cleanerService.CleanParallelAsync();
-
         public bool ProduceMessage(InputMessage message)
         {
             if(_serviceState != ServiceState.Running)
@@ -270,6 +264,8 @@ namespace DeKaSharp
                 return false;
             }
         }
+
+        private Task ClearAllAsync() => _cleanerService.CleanParallelAsync();
 
         public Task CleanAsync()
         {

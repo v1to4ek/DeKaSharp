@@ -1,5 +1,4 @@
 ﻿using Dekaf.Consumer;
-using Dekaf.Errors;
 
 namespace DeKaSharp.BrokerTaskBuilder.Containers
 {

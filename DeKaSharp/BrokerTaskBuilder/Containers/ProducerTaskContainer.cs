@@ -1,8 +1,4 @@
-﻿using Dekaf.Errors;
-using Dekaf.Producer;
-using System;
-using System.Collections.Generic;
-using System.Text;
+﻿using Dekaf.Producer;
 
 namespace DeKaSharp.BrokerTaskBuilder.Containers
 {
@@ -15,6 +11,8 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
         private readonly IKafkaProducer<string, string> _producer;
 
         private readonly InputRouter _router;
+
+        private readonly Action<string>? _onSentCallback;
 
         private readonly CancellationToken _ct;
 
@@ -41,6 +39,16 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
             Logger.Log($"Создан контейнер продьюсера c id: {_id}");
         }
 
+        public ProducerTaskContainer(string id,
+            string topic,
+            IKafkaProducer<string, string> producer,
+            InputRouter router,
+            Action<string> onSentCallback,
+            CancellationToken ct) 
+            : this(id, topic ,producer, router, ct)
+            => _onSentCallback = onSentCallback;
+
+
         //можно передать коллбэк для возврата ошибки
         //можно добавить вариант чтения из коллбека, а не из канала
         public Func<Task> GetTaskAction()
@@ -60,6 +68,8 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
                             var mesValue = item.MessageValue;
 
                             var data = await _producer.ProduceAsync(_topic, mesKey, mesValue);
+
+                            _onSentCallback?.Invoke($"Отправлено сообщение. Время: {data.Timestamp}. Топик: {data.Topic}");
 
                             Logger.Log($"Отправлено сообщение. Время: {data.Timestamp}. Топик: {data.Topic}");
                         }
