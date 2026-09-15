@@ -3,13 +3,13 @@ using System.Threading.Channels;
 
 namespace DeKaSharp
 {
-    internal class InputRouter : IAsyncCleanable
+    internal class ChannelRouter : IAsyncCleanable
     {
         private Channel<InputMessage>? _inputChannel;
 
         private readonly ConcurrentDictionary<string, Channel<OutputMessage>> _outputChannels;
 
-        public InputRouter()
+        public ChannelRouter()
         {
             _inputChannel = null;
 
@@ -26,28 +26,52 @@ namespace DeKaSharp
 
         public bool PublishItem(InputMessage message)
         {
-            if (_inputChannel == null)
-            {
-                throw new InvalidOperationException("Входной канал не инициализирован: сервис не запущен.");
-            }
+            CheckChannels(message.Id);
 
-            if (!_outputChannels.ContainsKey(message.Id))
-            {
-                throw new InvalidOperationException($"Не найден канал с id: {message.Id}");
-            }
-
-            if (_inputChannel.Writer.TryWrite(message))
+            if (_inputChannel!.Writer.TryWrite(message))
             {
                 return true;
             }
             else return false;
         }
 
-        public Channel<OutputMessage> GetChannelById(string id) => _outputChannels[id];
+        public ValueTask PublishItemAsync(InputMessage message, CancellationToken ct)
+        {
+            CheckChannels(message.Id);
+
+            return _inputChannel!.Writer.WriteAsync(message, ct);
+        }
+
+        private void CheckChannels(string id)
+        {
+            if (_inputChannel == null)
+            {
+                throw new InvalidOperationException("Входной канал не инициализирован: сервис не запущен.");
+            }
+
+            if (!_outputChannels.ContainsKey(id))
+            {
+                throw new InvalidOperationException($"Не найден канал с id: {id}");
+            }
+        }
+
+        public (bool found, Channel<OutputMessage>? channel) GetChannelById(string id)
+        {
+            if (_outputChannels.TryGetValue(id, out var channel))
+            {
+                return (true, channel);
+            }
+            else
+            {  
+                Logger.Log($"Не найден канал с id: {id}");
+
+                return (false, null);
+            }
+        }
 
         public Task RunAsync(CancellationToken ct)
         {
-            Logger.Log("Запуск сервиса роутера");
+            Logger.Log("Запуск сервиса роутера входных каналов");
 
             if (_inputChannel == null)
             {
@@ -72,14 +96,14 @@ namespace DeKaSharp
                 }
             }, ct);
 
-            Logger.Log("Запущен сервис роутера");
+            Logger.Log("Запущен сервис роутера входных каналов");
 
             return routerTask;
         }
 
         private void Clear()
         {
-            Logger.Log("Очистка каналов роутера");
+            Logger.Log("Очистка каналов входного роутера");
 
             _inputChannel?.Writer.Complete();
 
@@ -90,7 +114,7 @@ namespace DeKaSharp
 
             _outputChannels.Clear();
 
-            Logger.Log("Каналы роутера очищены");
+            Logger.Log("Каналы входного роутера очищены");
         }
 
         public Task CleanAsync() => Task.Run(Clear);

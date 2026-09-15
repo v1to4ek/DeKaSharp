@@ -1,7 +1,8 @@
 ﻿using Dekaf;
+using Dekaf.Consumer;
+using Dekaf.Producer;
 using DeKaSharp.BrokerTaskBuilder;
 using DeKaSharp.BrokerTaskBuilder.Containers;
-using System.Diagnostics.Tracing;
 
 namespace DeKaSharp
 {
@@ -11,23 +12,21 @@ namespace DeKaSharp
 
         private readonly BrokerTaskHandler _taskHandler;
 
-        private readonly InputRouter _inputRouter;
+        private readonly ChannelRouter _inputRouter;
+
+        private readonly ChannelRouter _outputRouter;
 
         private readonly CancellationTokenGenerator _cancellationGenerator;
 
         private readonly CleanerService _cleanerService;
 
-        private readonly Lock _stoppingLocker;
-
-        private bool _stopping;
+        private readonly Lock _serviceLocker;
 
         private ServiceState _serviceState;
 
         public event Action<string>? OnServiceStoppedCallback;
 
         public event Action<string>? OnServiceErrorCallback;
-
-        public event Action<string>? OnTaskErrorCallback;
 
         public int CleanerPriority => -1;
 
@@ -44,17 +43,17 @@ namespace DeKaSharp
 
             _brokerTasks = [];
 
+            _serviceLocker = new();
+
             _cancellationGenerator = new();
 
             _taskHandler = new();
 
             _inputRouter = new();
 
+            _outputRouter = new();
+
             _cleanerService = new();
-
-            _stoppingLocker = new();
-
-            _stopping = false;
 
             RegisterServicesForCleaning();
 
@@ -65,13 +64,56 @@ namespace DeKaSharp
         {
             _cleanerService.RegisterItem(_cancellationGenerator);
             _cleanerService.RegisterItem(_inputRouter);
+            _cleanerService.RegisterItem(_outputRouter);
             _cleanerService.RegisterItem(_taskHandler);
             _cleanerService.RegisterItem(this);
         }
 
+        /// <summary>
+        /// Регистрация продьюсера без коллбэка
+        /// </summary>
         public string RegisterProducer(string server, string topic)
         {
-            if(_serviceState == ServiceState.Running)
+            var producerTuple = RegisterProducerCore(server);
+
+            var producerId = producerTuple.producerId;
+
+            var producer = producerTuple.producer;
+
+            var ct = producerTuple.ct;
+
+            _taskHandler.AddTaskContainer(
+                () => new ProducerTaskContainer(producerId, topic, producer, _inputRouter, ct));
+
+            _serviceState = ServiceState.Registered;
+
+            return producerId;
+        }
+
+        /// <summary>
+        /// Регистрация продьюсера с коллбэком на результат отправки
+        /// </summary>
+        public string RegisterProducer(string server, string topic, Action<string> onSentCallback)
+        {
+            var producerTuple = RegisterProducerCore(server);
+
+            var producerId = producerTuple.producerId;
+
+            var producer = producerTuple.producer;
+
+            var ct = producerTuple.ct;
+
+            _taskHandler.AddTaskContainer(
+                () => new ProducerTaskContainer(producerId, topic, producer, _inputRouter, onSentCallback, ct));
+
+            _serviceState = ServiceState.Registered;
+
+            return producerId;
+        }
+
+        private (string producerId, IKafkaProducer<string,string> producer, CancellationToken ct) RegisterProducerCore(string server)
+        {
+            if (_serviceState == ServiceState.Running)
             {
                 throw new InvalidOperationException("Невозможно добавить продьюсер в запущенный сервис");
             }
@@ -89,15 +131,52 @@ namespace DeKaSharp
 
             var ct = _cancellationGenerator.GetOrCreateAndGet();
 
+            return (producerId, producer, ct);
+        }
+
+        /// <summary>
+        /// Регистрация консъюмера с каналом для записи
+        /// </summary>
+        public string RegisterConsumer(string server, string group, string topic)
+        {
+            var consumerTuple = RegisterConsumerCore(server, group, topic);
+
+            var consumerId = consumerTuple.consumerId;
+
+            var consumer = consumerTuple.consumer;
+
+            var ct = consumerTuple.ct;
+
             _taskHandler.AddTaskContainer(
-                () => new ProducerTaskContainer(producerId, topic, producer, _inputRouter, ct));
+                () => new ConsumerTaskContainer(consumerId, consumer, _outputRouter, ct));
 
             _serviceState = ServiceState.Registered;
 
-            return producerId;
+            return consumerId;
         }
 
-        public string RegisterConsumer(string server, string group, string topic, Action<string,string> callback)
+        /// <summary>
+        /// Регистрация консъюмера с коллбэком для получения сообщения
+        /// </summary>
+        public string RegisterConsumer(string server, string group, string topic, Action<string,string> outputCallback)
+        {
+            var consumerTuple = RegisterConsumerCore(server, group, topic);
+
+            var consumerId = consumerTuple.consumerId;
+
+            var consumer = consumerTuple.consumer;
+
+            var ct = consumerTuple.ct;
+
+            _taskHandler.AddTaskContainer(
+                () => new ConsumerTaskContainer(consumerId, consumer, outputCallback, ct));
+
+            _serviceState = ServiceState.Registered;
+
+            return consumerId;
+        }
+
+        private (string consumerId, IKafkaConsumer<string,string> consumer, CancellationToken ct) RegisterConsumerCore(string server, string group, string topic)
         {
             if (_serviceState == ServiceState.Running)
             {
@@ -117,12 +196,30 @@ namespace DeKaSharp
 
             var ct = _cancellationGenerator.GetOrCreateAndGet();
 
-            _taskHandler.AddTaskContainer(
-                () => new ConsumerTaskContainer(consumerId, consumer, callback, ct));
+            return (consumerId, consumer, ct);
+        }
 
-            _serviceState = ServiceState.Registered;
+        public bool SubscribeToBrokerError(string id, Action<string> callback)
+        {
+            try
+            {
+                if ( _serviceState != ServiceState.Registered)
+                {
+                    throw new InvalidOperationException("Невозможно подписаться на событие ошибки: сервис пуст либо уже запущен");
+                }
 
-            return consumerId;
+                _taskHandler.SubscribeToErrorById(id, callback);
+
+                Logger.Log($"Успешно выполнена подписка на событие ошибки в контейнере с id: {id}");
+
+                return true;
+            }
+            catch(Exception ex)
+            {
+                Logger.Log($"Ошибка при подписке на событие ошибки в контейнере с id: {id}. Текст ошибки: {ex.Message} ");
+
+                return false;
+            }
         }
 
         public async Task StartServiceAsync()
@@ -170,7 +267,7 @@ namespace DeKaSharp
             }
             catch(Exception ex)
             {
-                OnServiceErrorCallback?.Invoke($"Зафиксирована ошибка при выполнении сервиса: {ex.Message}");
+                OnServiceErrorCallback?.Invoke($"Произошла неожиданная ошибка при выполнении сервиса: {ex.Message}");
 
                 Logger.Log($"Произошла неожиданная ошибка при выполнении сервиса: {ex.Message}.");
             }
@@ -178,7 +275,7 @@ namespace DeKaSharp
             {
                 await ClearAllAsync();
 
-                OnServiceStoppedCallback?.Invoke($"Зафиксированна остановка сервиса.");
+                OnServiceStoppedCallback?.Invoke($"Выполнена остановка сервиса.");
 
                 Logger.Log("Сервис полностью остановлен");
             }
@@ -243,7 +340,10 @@ namespace DeKaSharp
             }
         }
 
-        public bool ProduceMessage(InputMessage message)
+        /// <summary>
+        /// Метод для отправки одного сообщения
+        /// </summary>
+        public bool TryProduceMessage(InputMessage message)
         {
             if(_serviceState != ServiceState.Running)
             {
@@ -263,6 +363,29 @@ namespace DeKaSharp
 
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Метод для синхронного получения одного сообщения
+        /// </summary>
+        public (bool success, OutputMessage? message) TryConsumeMessageSynchronously(string consumerId)
+        {
+            var (found, channel) = _outputRouter.GetChannelById(consumerId);
+
+            if (!found) return (false, null);
+
+            var outChannel = channel!;
+
+            if (outChannel.Reader.TryRead(out var message))
+            {
+                Logger.Log($"Успешно прочитано сообщение из канала с id: {consumerId}");
+
+                return (true, message);
+            }
+
+            Logger.Log($"Ошибка чтения из канала с id: {consumerId}");
+
+            return (false, null);
         }
 
         private Task ClearAllAsync() => _cleanerService.CleanParallelAsync();

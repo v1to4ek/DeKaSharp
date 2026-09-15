@@ -41,6 +41,15 @@ namespace DeKaSharp.BrokerTaskBuilder
             }
         }
 
+        public void SubscribeToErrorById(string brokerId, Action<string> errorCallback)
+        {
+            var container = _taskContainers
+                .FirstOrDefault(container => container.Id == brokerId) 
+                ?? throw new ArgumentException($"Нет зарегистрированного контейнера с id: {brokerId}");
+
+            container.SubscribeToErrorEvent(errorCallback);
+        }
+
         public IEnumerable<BuildedResult> BuildTasks()
         {
             lock (_locker)

@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace DeKaSharp.BrokerTaskBuilder.Containers
+﻿namespace DeKaSharp.BrokerTaskBuilder.Containers
 {
     internal interface IBrokerTaskContainer
     {
@@ -11,6 +7,8 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
         public string Id { get; }
 
         public Func<Task> GetTaskAction();
+
+        public void SubscribeToErrorEvent(Action<string>? onErrorCallback);
 
         public Task CleanAsync();
     }

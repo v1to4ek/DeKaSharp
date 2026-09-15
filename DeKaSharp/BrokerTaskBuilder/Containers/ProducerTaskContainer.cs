@@ -10,11 +10,13 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
 
         private readonly IKafkaProducer<string, string> _producer;
 
-        private readonly InputRouter _router;
-
-        private readonly Action<string>? _onSentCallback;
+        private readonly ChannelRouter _router;
 
         private readonly CancellationToken _ct;
+
+        private event Action<string>? OnSentCallback;
+
+        private event Action<string>? OnErrorCallback;
 
         public string Id => _id;
 
@@ -23,7 +25,7 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
         public ProducerTaskContainer(string id,
             string topic,
             IKafkaProducer<string, string> producer,
-            InputRouter router,
+            ChannelRouter router,
             CancellationToken ct)
         {
             _id = id;
@@ -42,12 +44,13 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
         public ProducerTaskContainer(string id,
             string topic,
             IKafkaProducer<string, string> producer,
-            InputRouter router,
+            ChannelRouter router,
             Action<string> onSentCallback,
             CancellationToken ct) 
             : this(id, topic ,producer, router, ct)
-            => _onSentCallback = onSentCallback;
+            => OnSentCallback += onSentCallback;
 
+        public void SubscribeToErrorEvent(Action<string>? onErrorCallback) => OnErrorCallback += onErrorCallback;
 
         //можно передать коллбэк для возврата ошибки
         //можно добавить вариант чтения из коллбека, а не из канала
@@ -59,9 +62,14 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
 
                     try
                     {
-                        var channel = _router.GetChannelById(_id);
+                        var (channelExists, channel) = _router.GetChannelById(_id);
 
-                        await foreach (var item in channel.Reader.ReadAllAsync(_ct))
+                        if (!channelExists)
+                        {
+                            throw new Exception($"Канал с id: {_id} не найден. Продьюсер не может быть запущен");
+                        }
+
+                        await foreach (var item in channel!.Reader.ReadAllAsync(_ct))
                         {
                             var mesKey = item.MessageKey;
 
@@ -69,7 +77,7 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
 
                             var data = await _producer.ProduceAsync(_topic, mesKey, mesValue);
 
-                            _onSentCallback?.Invoke($"Отправлено сообщение. Время: {data.Timestamp}. Топик: {data.Topic}");
+                            OnSentCallback?.Invoke($"Отправлено сообщение. Время: {data.Timestamp}. Топик: {data.Topic}");
 
                             Logger.Log($"Отправлено сообщение. Время: {data.Timestamp}. Топик: {data.Topic}");
                         }
@@ -82,6 +90,8 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
                     }
                     catch (Exception ex)
                     {
+                        OnErrorCallback?.Invoke($"Поймано исключение в таске продьюсера c id: {_id} : {ex.Message}");
+
                         Logger.Log($"Поймано исключение в таске продьюсера c id: {_id} : {ex.Message}");
                     }
                 },
@@ -92,6 +102,10 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
             await _producer.FlushAsync().AsTask();
 
             await _producer.DisposeAsync().AsTask();
+
+            OnSentCallback = null;
+
+            OnErrorCallback = null;
 
             Logger.Log($"Очистка контейнера продьюсера c id: {_id} завершена");
         }
