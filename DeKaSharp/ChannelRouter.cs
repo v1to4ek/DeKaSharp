@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿using DeKaSharp.DTO;
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 
 namespace DeKaSharp

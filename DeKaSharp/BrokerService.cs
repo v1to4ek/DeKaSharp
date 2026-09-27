@@ -3,6 +3,7 @@ using Dekaf.Consumer;
 using Dekaf.Producer;
 using DeKaSharp.BrokerTaskBuilder;
 using DeKaSharp.BrokerTaskBuilder.Containers;
+using DeKaSharp.DTO;
 
 namespace DeKaSharp
 {

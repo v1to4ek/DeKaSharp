@@ -1,20 +1,20 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace DeKaSharp
+﻿namespace DeKaSharp.DTO
 {
-    internal class OutputMessage
+    internal record class InputMessage 
     {
+        public string Id { get; private set; }
+
         public string MessageKey { get; private set; }
 
         public string MessageValue { get; private set; }
 
-        public OutputMessage(string  messageKey, string messageValue)
+        public InputMessage(string  id, string messageKey, string messageValue)
         {
+            Id = id;
+
             MessageKey = messageKey;
+
             MessageValue = messageValue;
         }
-
     }
 }

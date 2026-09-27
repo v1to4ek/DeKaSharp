@@ -1,4 +1,5 @@
 ﻿using Dekaf.Consumer;
+using DeKaSharp.DTO;
 
 namespace DeKaSharp.BrokerTaskBuilder.Containers
 {
