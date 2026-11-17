@@ -54,7 +54,7 @@ namespace DeKaSharp.BrokerTaskBuilder.Containers
 
         //можно передать коллбэк для возврата ошибки
         //можно добавить вариант чтения из коллбека, а не из канала
-        public Func<Task> GetTaskAction()
+        public Func<Task> GetTask()
             => () => Task.Run(
                 async () =>
                 {

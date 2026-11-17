@@ -58,7 +58,7 @@ namespace DeKaSharp.BrokerTaskBuilder
 
                 foreach (var container in _taskContainers)
                 {
-                    var taskFactory = container.GetTaskAction();
+                    var taskFactory = container.GetTask();
 
                     Logger.Log($"Создана фабрика задачи для id: {container.Id}");
 
